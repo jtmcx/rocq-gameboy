@@ -1,0 +1,17 @@
+*.vo
+*.vos
+*.vok
+.*.aux
+*.glob
+.lia.cache
+.nia.cache
+
+# dune
+_build
+
+# coq_makefile
+CoqMakefile.conf
+Makefile
+Makefile.conf
+
+_CoqProject
