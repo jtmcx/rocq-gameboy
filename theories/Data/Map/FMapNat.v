@@ -44,6 +44,12 @@ Definition nmap_union (m1 m2 : nmap) : nmap :=
   | NMap (Some x) pm1, NMap _ pm2 => NMap (Some x) (pmap_union pm1 pm2)
   end.
 
+Definition nmap_lookup_def (k : N) (m : nmap) (def : T) : T :=
+  match nmap_lookup k m with
+  | Some x => x
+  | None => def
+  end.
+
 Global Instance Map_nmap : Map N T nmap := {
   empty := nmap_empty;
   add := nmap_insert;
