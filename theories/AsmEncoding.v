@@ -7,9 +7,8 @@ Import ListNotations.
 Open Scope monad_scope.
 Open Scope u8_scope.
 
-
 (*|
-The definitions of ``asm_decode`` and ``asm_encode`` are intentionally
+The definitions of `asm_decode` and `asm_encode` are intentionally
 verbose.  We could do some fancy opcode decoding here, but it's much
 simpler to match against all 256 values of a byte. This allow us to
 avoid any bitwise operations, and simplifies proofs.
@@ -18,9 +17,9 @@ avoid any bitwise operations, and simplifies proofs.
 Section Decoder.
 
 (*|
-``asm_decode`` is written as an ``itree``. There is only one effect,
-``Fetch``, which pulls the next byte for the decoder to process.
-The instruction set has variable length encoding.
+`asm_decode` is written as an `itree`. There is only one effect, `Fetch`,
+which pulls the next byte for the decoder to process.  The instruction
+set has variable length encoding.
 |*)
 
 Variant FetchE : Type -> Type :=
@@ -37,7 +36,7 @@ Definition fetch16 : itree M u16 :=
   hi <- fetch ;;
   ret (Uint16.concat hi lo).
 
-Definition asm_decode_cb : u8 -> instr :=
+Definition asm_decode_cb : u8 -> instruction :=
   fun op => match op with
   | 0x00 => $[RLC B]
   | 0x01 => $[RLC C]
@@ -297,7 +296,7 @@ Definition asm_decode_cb : u8 -> instr :=
   | 0xFF => $[SET 7, A]
   end.
 
-Definition asm_decode' : u8 -> itree M instr :=
+Definition asm_decode' : u8 -> itree M instruction :=
   fun op => match op with
   | 0x00 => ret $[NOP]
   | 0x01 => w <- fetch16;; ret $[LDW BC, #w]
@@ -510,7 +509,7 @@ Definition asm_decode' : u8 -> itree M instr :=
   | 0xD0 => ret $[RET FNC]
   | 0xD1 => ret $[POP DE]
   | 0xD2 => w <- fetch16;; ret $[JP FNC, #w]
-  | 0xD3 => ret $[UNKNOWN 0xD3]
+  | 0xD3 => ret $[ILLEGAL 0xD3]
   | 0xD4 => w <- fetch16;; ret $[CALL FNC, #w]
   | 0xD5 => ret $[PUSH DE]
   | 0xD6 => b <- fetch;; ret $[SUB A, #b]
@@ -518,32 +517,32 @@ Definition asm_decode' : u8 -> itree M instr :=
   | 0xD8 => ret $[RET FC]
   | 0xD9 => ret $[RETI]
   | 0xDA => w <- fetch16;; ret $[JP FC, #w]
-  | 0xDB => ret $[UNKNOWN 0xDB]
+  | 0xDB => ret $[ILLEGAL 0xDB]
   | 0xDC => w <- fetch16;; ret $[CALL FC, #w]
-  | 0xDD => ret $[UNKNOWN 0xDD]
+  | 0xDD => ret $[ILLEGAL 0xDD]
   | 0xDE => b <- fetch;; ret $[SBC A, #b]
   | 0xDF => ret $[RST 0x18]
   | 0xE0 => b <- fetch;; ret $[LDH [#b], A]
   | 0xE1 => ret $[POP HL]
   | 0xE2 => ret $[LDH [C], A]
-  | 0xE3 => ret $[UNKNOWN 0xE3]
-  | 0xE4 => ret $[UNKNOWN 0xE4]
+  | 0xE3 => ret $[ILLEGAL 0xE3]
+  | 0xE4 => ret $[ILLEGAL 0xE4]
   | 0xE5 => ret $[PUSH HL]
   | 0xE6 => b <- fetch;; ret $[AND A, #b]
   | 0xE7 => ret $[RST 0x20]
   | 0xE8 => b <- fetch;; ret $[ADD SP, #b]
   | 0xE9 => ret $[JP HL]
   | 0xEA => w <- fetch16;; ret $[LD [#w], A]
-  | 0xEB => ret $[UNKNOWN 0xEB]
-  | 0xEC => ret $[UNKNOWN 0xEC]
-  | 0xED => ret $[UNKNOWN 0xED]
+  | 0xEB => ret $[ILLEGAL 0xEB]
+  | 0xEC => ret $[ILLEGAL 0xEC]
+  | 0xED => ret $[ILLEGAL 0xED]
   | 0xEE => b <- fetch;; ret $[XOR A, #b]
   | 0xEF => ret $[RST 0x28]
   | 0xF0 => b <- fetch;; ret $[LDH A, [#b]]
   | 0xF1 => ret $[POP AF]
   | 0xF2 => ret $[LDH A, [C]]
   | 0xF3 => ret $[DI]
-  | 0xF4 => ret $[UNKNOWN 0xF4]
+  | 0xF4 => ret $[ILLEGAL 0xF4]
   | 0xF5 => ret $[PUSH AF]
   | 0xF6 => b <- fetch;; ret $[OR A, #b]
   | 0xF7 => ret $[RST 0x30]
@@ -551,13 +550,13 @@ Definition asm_decode' : u8 -> itree M instr :=
   | 0xF9 => ret $[LDW SP, HL]
   | 0xFA => w <- fetch16;; ret $[LD A, [#w]]
   | 0xFB => ret $[EI]
-  | 0xFC => ret $[UNKNOWN 0xFC]
-  | 0xFD => ret $[UNKNOWN 0xFD]
+  | 0xFC => ret $[ILLEGAL 0xFC]
+  | 0xFD => ret $[ILLEGAL 0xFD]
   | 0xFE => b <- fetch;; ret $[CP A, #b]
   | 0xFF => ret $[RST 0x38]
   end.
 
-Definition asm_decode : itree M instr :=
+Definition asm_decode : itree M instruction :=
   op <- fetch ;; asm_decode' op.
 
 End Decoder.
@@ -566,7 +565,7 @@ Section Encoder.
 Local Notation "'lo'" := Uint16.lo.
 Local Notation "'hi'" := Uint16.hi.
 
-Definition asm_encode : instr -> list u8 :=
+Definition asm_encode : instruction -> list u8 :=
   fun instr => match instr with
   | $[ADC A, #b]          => [0xCE; b]
   | $[ADC A, A]           => [0x8F]
@@ -1068,17 +1067,17 @@ Definition asm_encode : instr -> list u8 :=
   | $[XOR A, H]           => [0xAC]
   | $[XOR A, L]           => [0xAD]
   | $[XOR A, [HL]]        => [0xAE]
-  | $[UNKNOWN 0xD3]       => [0xD3]
-  | $[UNKNOWN 0xDB]       => [0xDB]
-  | $[UNKNOWN 0xDD]       => [0xDD]
-  | $[UNKNOWN 0xE3]       => [0xE3]
-  | $[UNKNOWN 0xE4]       => [0xE4]
-  | $[UNKNOWN 0xEB]       => [0xEB]
-  | $[UNKNOWN 0xEC]       => [0xEC]
-  | $[UNKNOWN 0xED]       => [0xED]
-  | $[UNKNOWN 0xF4]       => [0xF4]
-  | $[UNKNOWN 0xFC]       => [0xFC]
-  | $[UNKNOWN 0xFD]       => [0xFD]
+  | $[ILLEGAL 0xD3]       => [0xD3]
+  | $[ILLEGAL 0xDB]       => [0xDB]
+  | $[ILLEGAL 0xDD]       => [0xDD]
+  | $[ILLEGAL 0xE3]       => [0xE3]
+  | $[ILLEGAL 0xE4]       => [0xE4]
+  | $[ILLEGAL 0xEB]       => [0xEB]
+  | $[ILLEGAL 0xEC]       => [0xEC]
+  | $[ILLEGAL 0xED]       => [0xED]
+  | $[ILLEGAL 0xF4]       => [0xF4]
+  | $[ILLEGAL 0xFC]       => [0xFC]
+  | $[ILLEGAL 0xFD]       => [0xFD]
   end.
 
 End Encoder.

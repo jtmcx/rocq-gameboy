@@ -24,8 +24,8 @@ Import Monads.
 Open Scope monad_scope.
 
 (*|
-A handler for ``Fetch`` that peels a byte off the head of a list.
-If the list is empty, we simply return zeros instead of signaling an error.
+A handler for `Fetch` that peels a byte off the head of a list.  If the
+list is empty, we simply return zeros instead of signaling an error.
 |*)
 
 Definition handle_fetch {E} : FetchE ~> stateT (list u8) (itree E) :=
@@ -41,19 +41,19 @@ Definition interp_fetch {E R}
 
 
 (*|
-We can interpret ``asm_decode`` using the ``handle_fetch`` handler:
-``decode_list`` is an itree that decodes assembly instructions from
+We can interpret `asm_decode` using the `handle_fetch` handler:
+`decode_list` is an itree that decodes assembly instructions from
 a list of bytes. It returns the decoded instruction, as well as the
 remaining bytes.
 |*)
 
 Definition decode_list 
-    : list u8 -> itree void1 (list u8 * instr) :=
+    : list u8 -> itree void1 (list u8 * instruction) :=
   interp_fetch asm_decode.
 
 (* Compute burn 8 (decode_list [0xFA; 0x34; 0x12]). *)
 (* =>  = Ret ([], $[LD A, [#0x1234]])
-       : itree void1 (list u8 * instr)
+       : itree void1 (list u8 * instruction)
 *)
 
 Lemma interp_fetch_ret : forall E R x xs,
@@ -133,37 +133,38 @@ Lemma concat_hi_lo : forall w,
   Uint16.concat (Uint16.hi w) (Uint16.lo w) = w.
 Proof.
   unfold Uint16.concat, Uint16.hi, Uint16.lo.
-  (* TODO: eta conversion? *)
-Admitted.
+  destruct w. cbn.
+  reflexivity.
+Qed.
 
 (*|
-Now we can prove that ``asm_encode`` and ``asm_decode`` are in harmony.
+Now we can prove that `asm_encode` and `asm_decode` roundtrip.
 |*)
 
-Lemma decode_encode : forall (i : instr),
+Lemma decode_encode : forall (i : instruction),
   @interp_fetch void1 _ asm_decode (asm_encode i) ≈ Ret ([], i).
 Proof.
   intros.
   unfold asm_decode.
 (*|
 The encode function is written as one giant match statement. We first
-destruct the ``instr`` at hand, but we then need to go further and destruct
-any register, conditional, etc for each instruction.  This enumerates
-all 511 cases.
+destruct the instruction at hand, but we then need to go further
+and destruct any register, conditional, etc for each instruction.
+This enumerates all 511 cases.
 |*)
   destruct i; cbn.
   all: repeat match goal with 
-    | x : reg8 |- _ => destruct x
+    | x : opreg8 |- _ => destruct x
     | x : bcde |- _ => destruct x
     | x : bcdehl |- _ => destruct x
     | x : preg16 |- _ => destruct x
     | x : qreg16 |- _ => destruct x
     | x : sreg16 |- _ => destruct x
-    | x : bitindex |- _ => destruct x
-    | x : option cond |- _ => destruct x
-    | x : cond |- _ => destruct x
-    | x : rst |- _ => destruct x
-    | x : unknownop |- _ => destruct x
+    | x : opbit |- _ => destruct x
+    | x : option opcond |- _ => destruct x
+    | x : opcond |- _ => destruct x
+    | x : oprst |- _ => destruct x
+    | x : opillegal |- _ => destruct x
   end.
 (*|
 All goals are waiting to read the opcode. We advance every goal by
@@ -193,8 +194,13 @@ Definition read_byte (mem : Mem) (addr : u16) : u8 :=
   | None => 0
   end.
 
+Definition read_u16le (mem : Mem) (addr : u16) : u16 :=
+  let lo := read_byte mem addr in
+  let hi := read_byte mem (Uint16.succ addr) in
+  Uint16.concat hi lo.
+
 (*|
-``read mem addr n`` reads a sequence of ``n`` bytes at a given ``addr``.
+`read mem addr n` reads a sequence of `n` bytes at a given `addr`.
 |*)
 
 Definition read (mem : Mem) (addr : u16) (n : nat) : list u8 :=
@@ -206,7 +212,7 @@ Definition read (mem : Mem) (addr : u16) (n : nat) : list u8 :=
   in rec [] n.
 
 (*|
-``handle_fetch_mem`` fetches bytes from memory. It's useful for
+`handle_fetch_mem` fetches bytes from memory. It's useful for
 disassembling instructions at arbitrary addresses.
 |*)
     
@@ -220,20 +226,22 @@ Definition interp_fetch_mem {E}
   fun mem => interp_state (case_ (handle_fetch_mem mem) pure_state).
 
 (*|
-``disassemble1 rom offset`` decodes a single assembly instruction at a
-given ``addr`` in memory. It returns the decoded instruction as well as
+`disassemble1 rom offset` decodes a single assembly instruction at a
+given `addr` in memory. It returns the decoded instruction as well as
 the adjusted offset.
 |*)
 
-Definition disassemble1 {E} : Mem -> u16 -> itree E (u16 * instr) :=
+Definition disassemble1 {E} : Mem -> u16 -> itree E (u16 * instruction) :=
   fun mem => interp_fetch_mem mem _ asm_decode.
 
-(* [disassemble k] disassembles a run of [k] instructions. Each instruction
-   is paired with its location in the ROM. Returns the list of instructions
-   as well as the final adjusted offset. *)
+(*|
+`disassemble k` disassembles a run of [k] instructions. Each instruction
+is paired with its location in the ROM. Returns the list of instructions
+as well as the final adjusted offset.
+*)
 
 Definition disassemble {E} (n : nat) (mem : Mem) (offset : u16)
-    : itree E (list (u16 * instr) * u16) :=
+    : itree E (list (u16 * instruction) * u16) :=
   let fix rec acc offset n {struct n} :=
     match n with
     | O    => ret (List.rev acc, offset)
@@ -274,21 +282,21 @@ Local Definition fuel : nat := 1024.
     entry point almost always is a NOP followed by a JP. In this example,
     we immediately jump to address 0x0637. *)
 
-(* Compute (burn fuel (disassemble 2 rom 0x100)). *)
+Compute (burn fuel (disassemble 2 rom 0x100)).
 (*    = Ret ([(256%N, $[NOP]);
               (257%N, $[JP #0x637])],
              260%N)
-      : itree ?E (list (N * instr) * N)
+      : itree ?E (list (N * instruction) * N)
 *)
 
 (** If we disassmble the code at 0x0637, we can see we're immediately
     redirected yet again to address 0x0430. *)
 
-(* Compute (burn fuel (disassemble 2 rom 0x637)). *)
+Compute (burn fuel (disassemble 2 rom 0x637)).
 (*    = Ret ([(1591%N, $[JP #0x430]);
               (1594%N, $[RET])],
              1595%N)
-      : itree ?E (list (N * instr) * N)
+      : itree ?E (list (N * instruction) * N)
 *)
 
 (** Address 0x0430 has some real code. This is the setup function called
@@ -296,7 +304,7 @@ Local Definition fuel : nat := 1024.
     
       https://github.com/retrio/gb-test-roms/blob/c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15/cpu_instrs/source/common/runtime.s#L72,L108 *)
 
-(* Compute (burn fuel (disassemble 33 rom 0x430)). *)
+Compute (burn fuel (disassemble 33 rom 0x430)).
 (*    = Ret
           ([(1072%N, $[DI]);
             (1073%N, $[LDW SP, #0xdfff]);
@@ -332,7 +340,7 @@ Local Definition fuel : nat := 1024.
             (1142%N, $[LD A, #0x0]);
             (1144%N, $[JP #0x47b])],
           1147%N)
-     : itree ?E (N * list (N * instr))
+     : itree ?E (N * list (N * instruction))
 *)
 
 End DisassemblyExamples.

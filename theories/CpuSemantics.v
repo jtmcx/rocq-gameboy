@@ -8,12 +8,6 @@ Import MonadNotation.
 Open Scope monad_scope.
 Open Scope u8_scope.
 
-
-(** The following definitions are defined with the [Cpu] namespace. We
-    define registers with names that conflict with the [Asm] module. *)
-
-Module Cpu.
-
 (** The SM83 has eight 8-bit registers: [A], [B], [C], [D], [E], [F],
     [H] and [L]. All registers are general purpose except for [F], which
     contains flags used for arithmetic and jumps. There are two 16-bit
@@ -64,14 +58,11 @@ Definition flagmask (f : flag) : byte :=
   | FC => 0x10
   end.
 
-End Cpu.
-Import Cpu.
-
 Coercion Reg8 : reg8 >-> reg.
 Coercion Reg16 : reg16 >-> reg.
 Coercion RegPair : regpair >-> reg.
 
-Definition reg_of_reg8 : Asm.reg8 -> reg8
+Definition reg_of_reg8 : Asm.opreg8 -> reg8
   := fun r => match r with
     | Asm.A => A
     | Asm.B => B
@@ -101,7 +92,7 @@ Definition reg_of_qreg16 : Asm.qreg16 -> regpair
     | Asm.AF => AF
   end.
 
-Coercion reg_of_reg8 : Asm.reg8 >-> reg8.
+Coercion reg_of_reg8 : Asm.opreg8 >-> reg8.
 Coercion reg_of_bcdehl : Asm.bcdehl >-> regpair.
 Coercion reg_of_preg16 : Asm.preg16 >-> reg.
 Coercion reg_of_qreg16 : Asm.qreg16 >-> regpair.
@@ -120,40 +111,32 @@ Section CpuE.
 Context {E: Type -> Type}.
 Context `{HasCpu : CpuE -< E}.
 
-Definition getreg8 : reg8 -> itree E u8 := embed GetReg8.
-Definition getreg16 : reg16 -> itree E u16 := embed GetReg16.
-Definition setreg8 : reg8 -> u8 -> itree E unit := embed SetReg8.
-Definition setreg16 : reg16 -> u16 -> itree E unit := embed SetReg16.
-Definition setime : bool -> itree E unit := embed SetIme.
-
-(** We can get/set register pairs by destructuring. *)
-
-Definition getregpair (p : regpair) : itree E u16 :=
-  let (r, s) := unpair p in
-  hi <- getreg8 r ;; 
-  lo <- getreg8 s ;;
-  ret (Uint16.concat hi lo).
-
-Definition setregpair (p : regpair) (x : u16) : itree E unit :=
-  let (r, s) := unpair p in
-  setreg8 r (Uint16.hi x) ;; 
-  setreg8 s (Uint16.lo x).
-
-(** Finally we can generalize get/set to any [reg]. *)
-
 Definition getreg {i} (r : reg i) : itree E i :=
   match r with
-  | Reg8 r => getreg8 r
-  | Reg16 r => getreg16 r
-  | RegPair p => getregpair p
+  | Reg8 r =>
+      trigger (GetReg8 r)
+  | Reg16 r =>
+      trigger (GetReg16 r)
+  | RegPair p =>
+      let (r, s) := unpair p in
+      hi <- trigger (GetReg8 r) ;;
+      lo <- trigger (GetReg8 s) ;;
+      ret (Uint16.concat hi lo)
   end.
 
 Definition setreg {i} (r : reg i) : i -> itree E unit :=
   match r with
-  | Reg8 r => setreg8 r
-  | Reg16 r => setreg16 r
-  | RegPair p => setregpair p
+  | Reg8 r => fun x =>
+      trigger (SetReg8 r x)
+  | Reg16 r => fun x =>
+      trigger (SetReg16 r x)
+  | RegPair p => fun x =>
+      let (r, s) := unpair p in
+      trigger (SetReg8 r (Uint16.hi x)) ;; 
+      trigger (SetReg8 s (Uint16.lo x))
   end.
+
+Definition setime : bool -> itree E unit := embed SetIme.
 
 End CpuE.
 
@@ -257,7 +240,7 @@ Parameter denote_addsp : u8 -> itree E unit.
 Parameter denote_cp : u8 -> itree E unit.
 Parameter denote_sbc : u8 -> itree E unit.
 Parameter denote_sub : u8 -> itree E unit.
-Parameter denote_bit : Asm.bitindex -> u8 -> itree E unit.
+Parameter denote_bit : Asm.opbit -> u8 -> itree E unit.
 
 (* AND A, r  /  AND A, u8  /  AND A, [HL] *)
 Definition denote_and (x : u8) : itree E unit :=
@@ -347,8 +330,8 @@ Parameter denote_srl : u8 -> itree E u8.
 
 
 (* RST u8 *)
-Definition denote_rst (addr : Asm.rst) : itree E unit
-  := setreg PC (Uint16.concat 0x00 (Asm.rst_to_u8 addr)).
+Definition denote_rst (addr : Asm.oprst) : itree E unit
+  := setreg PC (Uint16.concat 0x00 (Asm.oprst_to_u8 addr)).
 
 Definition denote_swap (x : u8) :=
   setflag FZ (x =? 0)%u8 ;;
@@ -360,7 +343,7 @@ Definition denote_swap (x : u8) :=
 
 Parameter denote_daa : itree E unit.
 
-Definition satisfies : Asm.cond -> itree E bool
+Definition satisfies : Asm.opcond -> itree E bool
   := fun c => match c with
     | Asm.FZ  => getflag FZ
     | Asm.FNZ => x <- getflag FZ ;; ret (negb x)
@@ -368,7 +351,7 @@ Definition satisfies : Asm.cond -> itree E bool
     | Asm.FNC => x <- getflag FC ;; ret (negb x)
    end.
 
-Definition denote_instr : Asm.instr -> itree E unit
+Definition denote_instr : Asm.instruction -> itree E unit
   := fun instr => match instr with
   | $[ADC A, #x] =>
       denote_adc x
@@ -521,10 +504,10 @@ Definition denote_instr : Asm.instr -> itree E unit
       ret tt (* TODO *)
   | $[RES b, [HL]] =>
       x <- load HL ;;
-      store HL (x .& .~ Asm.bitmask b)%u8
+      store HL (x .& .~ Asm.opbit_mask b)%u8
   | $[RES b, r] =>
       x <- getreg r ;;
-      setreg r (x .& .~ Asm.bitmask b)%u8
+      setreg r (x .& .~ Asm.opbit_mask b)%u8
   | $[RET] =>
       pop16 >>= setreg PC
   | $[RET cc] =>
@@ -574,10 +557,10 @@ Definition denote_instr : Asm.instr -> itree E unit
       denote_scf
   | $[SET b, [HL]] =>
       x <- load HL ;;
-      store HL (x .| Asm.bitmask b)%u8
+      store HL (x .| Asm.opbit_mask b)%u8
   | $[SET b, r] =>
       x <- getreg r ;;
-      setreg r (x .| Asm.bitmask b)%u8
+      setreg r (x .| Asm.opbit_mask b)%u8
   | $[SLA [HL]] =>
       x <- load HL ;;
       denote_sla x >>= store HL
@@ -616,7 +599,7 @@ Definition denote_instr : Asm.instr -> itree E unit
       load HL >>= denote_xor
   | $[XOR A, r] =>
       getreg r >>= denote_xor
-  | $[UNKNOWN _] =>
+  | $[ILLEGAL _] =>
       ret tt (* Illegal opcode; behave as if it's a NOP *)
   end.
 
@@ -628,7 +611,7 @@ Definition handle_fetch : FetchE ~> itree E :=
     | Fetch => x <- load PC ;; inc PC ;; ret x
   end.
 
-Definition denote_fetch : itree E instr
+Definition denote_fetch : itree E instruction
   := interp handle_fetch asm_decode.
 
 Definition denote_step : itree E unit := 
