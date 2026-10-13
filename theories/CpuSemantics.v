@@ -8,18 +8,22 @@ Import MonadNotation.
 Open Scope monad_scope.
 Open Scope u8_scope.
 
-(** The SM83 has eight 8-bit registers: [A], [B], [C], [D], [E], [F],
-    [H] and [L]. All registers are general purpose except for [F], which
-    contains flags used for arithmetic and jumps. There are two 16-bit
-    registers: [SP] (the stack pointer) and [PC] (the program counter). *)
+(*|
+The SM83 has eight 8-bit registers: `A`, `B`, `C`, `D`, `E`, `F`,
+`H` and `L`. All registers are general purpose except for `F`, which
+contains flags used for arithmetic and jumps. There are two 16-bit
+registers: `SP` (the stack pointer) and `PC` (the program counter).
+|*)
 
 Variant reg8 : Type := A | B | C | D | E | F | H | L.
 Variant reg16 : Type := SP | PC.
 
-(** 8-bit registers form _pairs_. There are four valid register pairs:
-    AF, BC, DE, and HL. In some contexts, register pairs can be used as
-    if they're a single 16-bit register. For example, `LDW BC, #0x1234`
-    loads `0x12` into `B` and `0x34` into `C`. *)
+(*|
+8-bit registers form *pairs*. There are four valid register pairs: `AF`,
+`BC`, `DE`, and `HL`. In some contexts, register pairs can be used as if
+they're a single 16-bit register. For example, `LDW BC, #0x1234` loads
+`0x12` into `B` and `0x34` into `C`.
+|*)
 
 Variant regpair : Type := BC | DE | HL | AF.
 
@@ -31,12 +35,14 @@ Definition unpair (p : regpair) : reg8 * reg8 :=
   | AF => (A, F)
   end.
 
-(** It's a little cumbersome to have to differentiate between [reg8]s,
-    [reg16]s, and [regpair]s all the time. To make life easier, we define
-    a unified [reg] type that can handle all three. The [reg] type is
-    indexed by the value it holds, so we can restrict its inhabitants
-    to contexts that expect 8-bit or 16-bit registers. Finally, we can
-    implicitly coerce any [reg8], [reg16], or [regpair] into a [reg]. *)
+(*|
+It's a little cumbersome to have to differentiate between `reg8`s,
+`reg16`s, and `regpair`s all the time. To make life easier, we define
+a unified `reg` type that can handle all three. The `reg` type is
+indexed by the value it holds, so we can restrict its inhabitants
+to contexts that expect 8-bit or 16-bit registers. Finally, we can
+implicitly coerce any `reg8`, `reg16`, or `regpair` into a `reg`.
+|*)
 
 Variant reg : Type -> Type :=
   | Reg8 : reg8 -> reg u8
@@ -97,8 +103,7 @@ Coercion reg_of_bcdehl : Asm.bcdehl >-> regpair.
 Coercion reg_of_preg16 : Asm.preg16 >-> reg.
 Coercion reg_of_qreg16 : Asm.qreg16 >-> regpair.
 
-(** ** Processor Events *)
-(* -------------------------------------------------------------------------- *)
+(* Processor Events *)
 
 Variant CpuE : Type -> Type :=
   | GetReg8 : reg8 -> CpuE u8
@@ -140,8 +145,7 @@ Definition setime : bool -> itree E unit := embed SetIme.
 
 End CpuE.
 
-(** ... *)
-(* -------------------------------------------------------------------------- *)
+(* Memory Events *)
 
 Variant MemE : Type -> Type :=
   | MemRead  : u16 -> MemE u8
@@ -156,18 +160,16 @@ Definition memwrite : u16 -> u8 -> itree E unit := embed MemWrite.
 
 End MemE.
 
-(** ... *)
-
-(** ** Semantics *)
-(* -------------------------------------------------------------------------- *)
+(* Semantics *)
 
 Section Semantics.
 Context {E : Type -> Type}.
 Context {HasCpu : CpuE -< E}.
 Context {HasMem : MemE -< E}.
 
-(** Load or store a byte at the address pointed to by a given 
-    16-bit register. *)
+(*|
+Load or store a byte at the address pointed to by a given 16-bit register.
+|*)
 
 Definition load : reg u16 -> itree E u8
   := fun r => addr <- getreg r ;; memread addr.
@@ -175,7 +177,9 @@ Definition load : reg u16 -> itree E u8
 Definition store : reg u16 -> u8 -> itree E unit
   := fun r x => addr <- getreg r ;; memwrite addr x.
 
-(** Increment or decrement the value in a register.  *)
+(*|
+Increment or decrement the value in a register.
+|*)
 
 Definition inc {i} : reg i -> itree E unit
   := fun r => match r with
@@ -189,8 +193,10 @@ Definition dec {i} : reg i -> itree E unit
       | Reg16 r | RegPair r => x <- getreg r ;; setreg r (Uint16.pred x)
     end.
 
-(** Push or pop a byte from the stack. The stack grows downward. The
-    stack pointer always points to the last value pushed. *)
+(*|
+Push or pop a byte from the stack. The stack grows downward. The stack
+pointer always points to the last value pushed.
+|*)
 
 Definition push : u8 -> itree E unit
   := fun x => dec SP ;; store SP x.
@@ -198,9 +204,10 @@ Definition push : u8 -> itree E unit
 Definition pop : itree E u8
   := x <- load SP ;; inc SP ;; ret x.
 
-(** Push or pop a 16-bit value from the stack. Note that 16-bit words
-    are stored in little-endian order on the stack; the high byte is
-    pushed first. *)
+(*|
+Push or pop a 16-bit value from the stack. Note that 16-bit words are
+stored in little-endian order on the stack; the high byte is pushed first.
+|*)
 
 Definition push16 : u16 -> itree E unit 
   := fun x => push (Uint16.hi x) ;; push (Uint16.lo x).
@@ -208,10 +215,12 @@ Definition push16 : u16 -> itree E unit
 Definition pop16 : itree E u16
   := lo <- pop ;; hi <- pop ;; ret (Uint16.concat hi lo).
 
-(** The [readhi] and [writehi] instructions are specializations of
-    [memread] and [memwrite] that read and write to the highest page.
-    These functions take an 8-bit value [x] and read/write to address
-    [0xFF00 + x]. See documentation for the [LDH] instruction. *)
+(*|
+The `readhi` and `writehi` instructions are specializations of `memread`
+and `memwrite` that read and write to the highest page.  These functions
+take an 8-bit value `x` and read/write to address `0xFF00 + x`. See
+documentation for the `LDH` instruction.
+|*)
 
 Definition readhi : u8 -> itree E u8
   := fun addr => memread (Uint16.concat 0xFF addr).
@@ -231,7 +240,7 @@ Definition setflag : flag -> bool -> itree E unit
   end.
   
 
-(** ** Instruction Semantics *)
+(* Instruction Semantics *)
 
 Parameter denote_adc : u8 -> itree E unit.
 Parameter denote_add : u8 -> itree E unit.
