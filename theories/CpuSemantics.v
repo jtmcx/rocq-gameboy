@@ -612,8 +612,10 @@ Definition denote_instr : Asm.instruction -> itree E unit
       ret tt (* Illegal opcode; behave as if it's a NOP *)
   end.
 
-(** [handle_fetch] is a handler that converts [Fetch] events into
-    [MemRead] events using the current PC. *)
+(*|
+`handle_fetch` is a handler that converts `Fetch` events into `MemRead`
+events using the current PC.
+|*)
 
 Definition handle_fetch : FetchE ~> itree E :=
   fun _ e => match e with
