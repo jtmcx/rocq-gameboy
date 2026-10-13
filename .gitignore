@@ -6,8 +6,8 @@
 .lia.cache
 .nia.cache
 
-# dune
 _build
+.direnv
 
 # coq_makefile
 CoqMakefile.conf
