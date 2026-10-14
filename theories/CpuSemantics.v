@@ -6,7 +6,15 @@ From GameBoy Require Import Asm AsmEncoding.
 Import ITreeNotations.
 Import MonadNotation.
 Open Scope monad_scope.
-Open Scope u8_scope.
+
+Definition lo : u16 -> u8 :=
+  fun x => u16_to_u8 x.
+
+Definition hi : u16 -> u8 :=
+  fun x => u16_to_u8 (x >> 8)%u16.
+
+Definition make_u16 : u8 -> u8 -> u16 :=
+  fun hi lo => (u8_to_u16 hi << 8 .| u8_to_u16 lo)%u16.
 
 (*|
 The SM83 has eight 8-bit registers: `A`, `B`, `C`, `D`, `E`, `F`,
@@ -56,7 +64,7 @@ Variant flag : Type :=
   | FH    (* Half-carry *)
   | FC.   (* Carry *)
 
-Definition flagmask (f : flag) : byte :=
+Definition flagmask (f : flag) : u8 :=
   match f with
   | FZ => 0x80
   | FN => 0x40
@@ -126,7 +134,7 @@ Definition getreg {i} (r : reg i) : itree E i :=
       let (r, s) := unpair p in
       hi <- trigger (GetReg8 r) ;;
       lo <- trigger (GetReg8 s) ;;
-      ret (Uint16.concat hi lo)
+      Ret (make_u16 hi lo)
   end.
 
 Definition setreg {i} (r : reg i) : i -> itree E unit :=
@@ -137,11 +145,12 @@ Definition setreg {i} (r : reg i) : i -> itree E unit :=
       trigger (SetReg16 r x)
   | RegPair p => fun x =>
       let (r, s) := unpair p in
-      trigger (SetReg8 r (Uint16.hi x)) ;; 
-      trigger (SetReg8 s (Uint16.lo x))
+      trigger (SetReg8 r (hi x)) ;; 
+      trigger (SetReg8 s (lo x))
   end.
 
-Definition setime : bool -> itree E unit := embed SetIme.
+Definition setime : bool -> itree E unit :=
+  fun x => trigger (SetIme x).
 
 End CpuE.
 
@@ -210,10 +219,10 @@ stored in little-endian order on the stack; the high byte is pushed first.
 |*)
 
 Definition push16 : u16 -> itree E unit 
-  := fun x => push (Uint16.hi x) ;; push (Uint16.lo x).
+  := fun x => push (hi x) ;; push (lo x).
 
 Definition pop16 : itree E u16
-  := lo <- pop ;; hi <- pop ;; ret (Uint16.concat hi lo).
+  := lo <- pop ;; hi <- pop ;; ret (make_u16 hi lo).
 
 (*|
 The `readhi` and `writehi` instructions are specializations of `memread`
@@ -223,10 +232,10 @@ documentation for the `LDH` instruction.
 |*)
 
 Definition readhi : u8 -> itree E u8
-  := fun addr => memread (Uint16.concat 0xFF addr).
+  := fun addr => memread (make_u16 0xFF addr).
 
 Definition writehi : u8 -> u8 -> itree E unit
-  := fun addr => memwrite (Uint16.concat 0xFF addr).
+  := fun addr => memwrite (make_u16 0xFF addr).
 
 Definition getflag (f : flag) : itree E bool :=
   x <- getreg F ;; 
@@ -245,7 +254,7 @@ Definition setflag : flag -> bool -> itree E unit
 Parameter denote_adc : u8 -> itree E unit.
 Parameter denote_add : u8 -> itree E unit.
 Parameter denote_addp : u16 -> itree E unit.
-Parameter denote_addsp : u8 -> itree E unit.
+Parameter denote_addsp : i8 -> itree E unit.
 Parameter denote_cp : u8 -> itree E unit.
 Parameter denote_sbc : u8 -> itree E unit.
 Parameter denote_sub : u8 -> itree E unit.
@@ -340,7 +349,7 @@ Parameter denote_srl : u8 -> itree E u8.
 
 (* RST u8 *)
 Definition denote_rst (addr : Asm.oprst) : itree E unit
-  := setreg PC (Uint16.concat 0x00 (Asm.oprst_to_u8 addr)).
+  := setreg PC (u8_to_u16 (Asm.oprst_to_u8 addr)).
 
 Definition denote_swap (x : u8) :=
   setflag FZ (x =? 0)%u8 ;;
@@ -452,18 +461,18 @@ Definition denote_instr : Asm.instruction -> itree E unit
       memread x >>= setreg A
   | $[LDH A, [C]] =>
       c <- getreg C ;;
-      v <- memread (Uint16.concat 0xFF c) ;;
+      v <- memread (make_u16 0xFF c) ;;
       setreg A v
   | $[LDH A, [#x]] =>
-      v <- memread (Uint16.concat 0xFF x) ;;
+      v <- memread (make_u16 0xFF x) ;;
       setreg A v
   | $[LDH [C], A] =>
       c <- getreg C ;;
       v <- getreg A ;;
-      memwrite (Uint16.concat 0xFF c) v
+      memwrite (make_u16 0xFF c) v
   | $[LDH [#x], A] =>
       v <- getreg A ;;
-      memwrite (Uint16.concat 0xFF x) v
+      memwrite (make_u16 0xFF x) v
   | $[LD [HL], #x] =>
       store HL x
   | $[LD [HL], r] =>

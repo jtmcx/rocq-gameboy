@@ -1,5 +1,4 @@
 From GameBoy.Stdint Require Import Stdint.
-Open Scope u8_scope.
 
 (*|
 This module defines the syntax for SM83 assembly programs.  It takes
@@ -217,94 +216,94 @@ Coercion Pinstr : instruction >-> program.
 
 Definition opbit_to_u8 : opbit -> u8 :=
   fun i => match i with
-    | B0 => 0
-    | B1 => 1
-    | B2 => 2
-    | B3 => 3
-    | B4 => 4
-    | B5 => 5
-    | B6 => 6
-    | B7 => 7
+    | B0 => 0%u8
+    | B1 => 1%u8
+    | B2 => 2%u8
+    | B3 => 3%u8
+    | B4 => 4%u8
+    | B5 => 5%u8
+    | B6 => 6%u8
+    | B7 => 7%u8
   end.
 
 Definition opbit_of_u8 : u8 -> option opbit :=
   fun b => match b with
-    | 0 => Some B0
-    | 1 => Some B1
-    | 2 => Some B2
-    | 3 => Some B3
-    | 4 => Some B4
-    | 5 => Some B5
-    | 6 => Some B6
-    | 7 => Some B7
-    | _ => None
+    | 0%u8 => Some B0
+    | 1%u8 => Some B1
+    | 2%u8 => Some B2
+    | 3%u8 => Some B3
+    | 4%u8 => Some B4
+    | 5%u8 => Some B5
+    | 6%u8 => Some B6
+    | 7%u8 => Some B7
+    | _%u8 => None
   end.
 
 Definition opbit_mask : opbit -> u8 :=
   fun i => match i with
-    | B0 => 0x01
-    | B1 => 0x02
-    | B2 => 0x04
-    | B3 => 0x08
-    | B4 => 0x10
-    | B5 => 0x20
-    | B6 => 0x40
-    | B7 => 0x80
+    | B0 => 0x01%u8
+    | B1 => 0x02%u8
+    | B2 => 0x04%u8
+    | B3 => 0x08%u8
+    | B4 => 0x10%u8
+    | B5 => 0x20%u8
+    | B6 => 0x40%u8
+    | B7 => 0x80%u8
   end.
 
 Definition oprst_to_u8 : oprst -> u8 :=
   fun r => match r with
-    | R00 => 0x00
-    | R08 => 0x08
-    | R10 => 0x10
-    | R18 => 0x18
-    | R20 => 0x20
-    | R28 => 0x28
-    | R30 => 0x30
-    | R38 => 0x38
+    | R00 => 0x00%u8
+    | R08 => 0x08%u8
+    | R10 => 0x10%u8
+    | R18 => 0x18%u8
+    | R20 => 0x20%u8
+    | R28 => 0x28%u8
+    | R30 => 0x30%u8
+    | R38 => 0x38%u8
   end.
 
 Definition oprst_of_u8 : u8 -> option oprst :=
   fun r => match r with
-    | 0x00 => Some R00
-    | 0x08 => Some R08
-    | 0x10 => Some R10
-    | 0x18 => Some R18
-    | 0x20 => Some R20
-    | 0x28 => Some R28
-    | 0x30 => Some R30
-    | 0x38 => Some R38
+    | 0x00%u8 => Some R00
+    | 0x08%u8 => Some R08
+    | 0x10%u8 => Some R10
+    | 0x18%u8 => Some R18
+    | 0x20%u8 => Some R20
+    | 0x28%u8 => Some R28
+    | 0x30%u8 => Some R30
+    | 0x38%u8 => Some R38
     | _ => None
   end.
 
 Definition opillegal_to_u8 : opillegal -> u8 :=
   fun x => match x with
-    | UD3 => 0xD3
-    | UDB => 0xDB
-    | UDD => 0xDD
-    | UE3 => 0xE3
-    | UE4 => 0xE4
-    | UEB => 0xEB
-    | UEC => 0xEC
-    | UED => 0xED
-    | UF4 => 0xF4
-    | UFC => 0xFC
-    | UFD => 0xFD
+    | UD3 => 0xD3%u8
+    | UDB => 0xDB%u8
+    | UDD => 0xDD%u8
+    | UE3 => 0xE3%u8
+    | UE4 => 0xE4%u8
+    | UEB => 0xEB%u8
+    | UEC => 0xEC%u8
+    | UED => 0xED%u8
+    | UF4 => 0xF4%u8
+    | UFC => 0xFC%u8
+    | UFD => 0xFD%u8
   end.
 
 Definition opillegal_of_u8 : u8 -> option opillegal :=
   fun x => match x with
-    | 0xD3 => Some UD3
-    | 0xDB => Some UDB
-    | 0xDD => Some UDD
-    | 0xE3 => Some UE3
-    | 0xE4 => Some UE4
-    | 0xEB => Some UEB
-    | 0xEC => Some UEC
-    | 0xED => Some UED
-    | 0xF4 => Some UF4
-    | 0xFC => Some UFC
-    | 0xFD => Some UFD
+    | 0xD3%u8 => Some UD3
+    | 0xDB%u8 => Some UDB
+    | 0xDD%u8 => Some UDD
+    | 0xE3%u8 => Some UE3
+    | 0xE4%u8 => Some UE4
+    | 0xEB%u8 => Some UEB
+    | 0xEC%u8 => Some UEC
+    | 0xED%u8 => Some UED
+    | 0xF4%u8 => Some UF4
+    | 0xFC%u8 => Some UFC
+    | 0xFD%u8 => Some UFD
     | _ => None
   end.
 
@@ -314,11 +313,11 @@ Declare Scope opbit_scope.
 Delimit Scope opbit_scope with opbit.
 Bind Scope opbit_scope with opbit.
 
-Definition opbit_to_num : opbit -> Number.uint :=
-  fun r => Uint8.to_num_unsigned (opbit_to_u8 r).
+Definition opbit_to_num : opbit -> Number.int :=
+  fun r => Uint8.to_num (opbit_to_u8 r).
 
-Definition opbit_of_num : Number.uint -> option opbit :=
-  fun n => match Uint8.of_num_unsigned n with
+Definition opbit_of_num : Number.int -> option opbit :=
+  fun n => match Uint8.of_num n with
   | None => None
   | Some x => opbit_of_u8 x
   end.
@@ -332,11 +331,11 @@ Declare Scope oprst_scope.
 Delimit Scope oprst_scope with oprst.
 Bind Scope oprst_scope with oprst.
 
-Definition oprst_to_hex_num : oprst -> Number.uint :=
-  fun r => Uint8.to_hex_unsigned (oprst_to_u8 r).
+Definition oprst_to_hex_num : oprst -> Number.int :=
+  fun r => Uint8.to_hex (oprst_to_u8 r).
 
-Definition oprst_of_num : Number.uint -> option oprst :=
-  fun n => match Uint8.of_num_unsigned n with
+Definition oprst_of_num : Number.int -> option oprst :=
+  fun n => match Uint8.of_num n with
   | None => None
   | Some x => oprst_of_u8 x
   end.
@@ -350,11 +349,11 @@ Declare Scope opillegal_scope.
 Delimit Scope opillegal_scope with opillegal.
 Bind Scope opillegal_scope with opillegal.
 
-Definition opillegal_to_hex_num : opillegal -> Number.uint :=
-  fun r => Uint8.to_hex_unsigned (opillegal_to_u8 r).
+Definition opillegal_to_hex_num : opillegal -> Number.int :=
+  fun r => Uint8.to_hex (opillegal_to_u8 r).
 
-Definition opillegal_of_num : Number.uint -> option opillegal :=
-  fun n => match Uint8.of_num_unsigned n with
+Definition opillegal_of_num : Number.int -> option opillegal :=
+  fun n => match Uint8.of_num n with
   | None => None
   | Some x => opillegal_of_u8 x
   end.
@@ -581,7 +580,7 @@ Notation "'LDW' '[' '#' n ']' ',' 'SP'" := (Ild_LK n)
 Notation "'LDW' 'SP' ',' 'HL'" := Ild_KJ
   (in custom asm at level 0, format "LDW  SP ,  HL").
 
-Notation "'LDW' 'HL' ',' 'SP'" := (Ild_JK x00)
+Notation "'LDW' 'HL' ',' 'SP'" := (Ild_JK 0)
   (in custom asm at level 0, format "LDW  HL ,  SP").
 
 Notation "'LDW' 'HL' ',' 'SP' '+' '#' n" := (Ild_JK n)
@@ -782,7 +781,7 @@ Notation "'ILLEGAL' x" := (Iillegal x)
 
 Goal True.
   Tactic Notation "test" constr(T) :=
-    let H := fresh "OK" in assert (H: T) by reflexivity; clear H.
+    let H := fresh "OK" in assert (H: T) by reflexivity.
 
   (* Misc ALU instructions *)
   test ($[ADC A, B] = Iadc_R B).
@@ -809,7 +808,7 @@ Goal True.
   test ($[LD [HL+], A] = Ild_SA HLI).
   test ($[LD [HL-], A] = Ild_SA HLD).
   test ($[LDW SP, HL] = Ild_KJ).
-  test ($[LDW HL, SP] = Ild_JK 0).
+  test ($[LDW HL, SP] = Ild_JK 0%u8).
   test ($[LDW HL, SP + #0] = Ild_JK 0).
   test ($[LDW HL, SP + #0xFF] = Ild_JK 0xFF).
   test ($[LDH A, [C]] = Ildh_AC).

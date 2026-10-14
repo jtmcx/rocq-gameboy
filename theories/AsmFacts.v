@@ -31,8 +31,8 @@ list is empty, we simply return zeros instead of signaling an error.
 Definition handle_fetch {E} : FetchE ~> stateT (list u8) (itree E) :=
   fun _ 'Fetch xs =>
     match xs with
-    | []       => ret ([], 0x00)
-    | x :: xs' => ret (xs', x)
+    | []       => Ret ([], 0x00)
+    | x :: xs' => Ret (xs', x)
     end.
 
 Definition interp_fetch {E R}
@@ -104,23 +104,25 @@ Proof.
   reflexivity.
 Qed.
 
+
 Lemma interp_fetch_trigger_fetch16 : forall E lo hi xs,
   @interp_fetch E _ fetch16 (lo :: hi :: xs)
   ≈
-  Ret (xs, Uint16.concat hi lo).
+  Ret (xs, make_u16 hi lo).
 Proof.
   intros.
   unfold fetch16.
   rewrite interp_fetch_bind_fetch. cbn.
   rewrite interp_fetch_bind_fetch. cbn.
   rewrite interp_fetch_ret.
+  unfold make_u16.
   reflexivity.
 Qed. 
 
 Lemma interp_fetch_bind_fetch16 : forall E R hi lo xs k,
   @interp_fetch E R (x <- fetch16;; k x) (lo :: hi :: xs) 
   ≈
-  @interp_fetch E R (k (Uint16.concat hi lo)) xs.
+  @interp_fetch E R (k (make_u16 hi lo)) xs.
 Proof.
   intros.
   rewrite interp_fetch_bind.
@@ -130,11 +132,13 @@ Proof.
 Qed.
 
 Lemma concat_hi_lo : forall w,
-  Uint16.concat (Uint16.hi w) (Uint16.lo w) = w.
+  make_u16 (hi w) (lo w) = w.
+Admitted.
+
+Lemma i8_to_u8_to_i8 : forall x,
+  u8_to_i8 (i8_to_u8 x) = x.
 Proof.
-  unfold Uint16.concat, Uint16.hi, Uint16.lo.
-  destruct w. cbn.
-  reflexivity.
+  destruct x; auto.
 Qed.
 
 (*|
@@ -179,8 +183,11 @@ we get to a `Ret`. Most are solvable by reflexivity.
         rewrite interp_fetch_bind_fetch; cbn
     | |- interp_fetch (_ <- fetch16;; _) (_ :: _) ≈ _ =>
         rewrite interp_fetch_bind_fetch16; cbn
+    | |- context [u8_to_i8 (i8_to_u8 _)] =>
+        rewrite -> i8_to_u8_to_i8
+    | |- context [make_u16 (hi _) (lo _)] =>
+        rewrite -> concat_hi_lo
   end.
-  all: rewrite concat_hi_lo.
   all: reflexivity.
 Qed.
 
@@ -189,7 +196,7 @@ Context {Mem : Type}.
 Context {IsMap : Map N u8 Mem}.
 
 Definition read_byte (mem : Mem) (addr : u16) : u8 :=
-  match lookup (Uint16.to_N addr) mem with
+  match lookup (Z.to_N (Uint16.unsigned addr)) mem with
   | Some x => x
   | None => 0
   end.
@@ -197,7 +204,7 @@ Definition read_byte (mem : Mem) (addr : u16) : u8 :=
 Definition read_u16le (mem : Mem) (addr : u16) : u16 :=
   let lo := read_byte mem addr in
   let hi := read_byte mem (Uint16.succ addr) in
-  Uint16.concat hi lo.
+  make_u16 hi lo.
 
 (*|
 `read mem addr n` reads a sequence of `n` bytes at a given `addr`.
@@ -207,7 +214,7 @@ Definition read (mem : Mem) (addr : u16) (n : nat) : list u8 :=
   let fix rec acc n {struct n} :=
     match n with
     | O    => acc (* Note: we read bytes backwards. No rev here. *)
-    | S n' => rec (read_byte mem (addr + Uint16.wrapN (N.of_nat n'))%u16 :: acc) n'
+    | S n' => rec (read_byte mem (addr + Uint16.wrap (Z.of_nat n'))%u16 :: acc) n'
     end
   in rec [] n.
 
@@ -282,21 +289,21 @@ Local Definition fuel : nat := 1024.
     entry point almost always is a NOP followed by a JP. In this example,
     we immediately jump to address 0x0637. *)
 
-Compute (burn fuel (disassemble 2 rom 0x100)).
-(*    = Ret ([(256%N, $[NOP]);
-              (257%N, $[JP #0x637])],
-             260%N)
-      : itree ?E (list (N * instruction) * N)
+(* Compute (burn fuel (disassemble 2 rom 0x100)). *)
+(*    = Ret ([(0x100%u16, $[NOP]);
+              (0x101%u16, $[JP #0x637])],
+             0x104%u16)
+      : itree ?E (list (u16 * instruction) * u16)
 *)
 
 (** If we disassmble the code at 0x0637, we can see we're immediately
     redirected yet again to address 0x0430. *)
 
-Compute (burn fuel (disassemble 2 rom 0x637)).
-(*    = Ret ([(1591%N, $[JP #0x430]);
-              (1594%N, $[RET])],
-             1595%N)
-      : itree ?E (list (N * instruction) * N)
+(* Compute (burn fuel (disassemble 2 rom 0x637)). *)
+(*    = Ret ([(0x637%u16, $[JP #0x430]);
+              (0x63a%u16, $[RET])],
+             0x63b%u16)
+      : itree ?E (list (u16 * instruction) * u16)
 *)
 
 (** Address 0x0430 has some real code. This is the setup function called
@@ -304,43 +311,42 @@ Compute (burn fuel (disassemble 2 rom 0x637)).
     
       https://github.com/retrio/gb-test-roms/blob/c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15/cpu_instrs/source/common/runtime.s#L72,L108 *)
 
-Compute (burn fuel (disassemble 33 rom 0x430)).
+(* Compute (burn fuel (disassemble 33 rom 0x430)). *)
 (*    = Ret
-          ([(1072%N, $[DI]);
-            (1073%N, $[LDW SP, #0xdfff]);
-            (1076%N, $[LD [#0xd600], A]);
-            (1079%N, $[LD A, #0x0]);
-            (1081%N, $[LDH [#0x7], A]);
-            (1083%N, $[LD A, #0x0]);
-            (1085%N, $[LDH [#0xf], A]);
-            (1087%N, $[LD A, #0x0]);
-            (1089%N, $[LDH [#0xff], A]);
-            (1091%N, $[LD A, #0x0]);
-            (1093%N, $[LDH [#0x26], A]);
-            (1095%N, $[LD A, #0x80]);
-            (1097%N, $[LDH [#0x26], A]);
-            (1099%N, $[LD A, #0xff]);
-            (1101%N, $[LDH [#0x25], A]);
-            (1103%N, $[LD A, #0x77]);
-            (1105%N, $[LDH [#0x24], A]);
-            (1107%N, $[LDW HL, #0xb8f]);
-            (1110%N, $[CALL #0x2a3]);
-            (1113%N, $[CALL #0x38e]);
-            (1116%N, $[CALL #0xb79]);
-            (1119%N, $[CALL #0x25f]);
-            (1122%N, $[PUSH AF]);
-            (1123%N, $[LD A, #0x3]);
-            (1125%N, $[CALL #0x22f]);
-            (1128%N, $[LD A, #0xff]);
-            (1130%N, $[CALL #0x222]);
-            (1133%N, $[LD A, #0xcd]);
-            (1135%N, $[CALL #0x213]);
-            (1138%N, $[POP AF]);
-            (1139%N, $[CALL #0x63b]);
-            (1142%N, $[LD A, #0x0]);
-            (1144%N, $[JP #0x47b])],
-          1147%N)
-     : itree ?E (N * list (N * instruction))
+          ([(0x430%u16, $[DI]);
+          (0x431%u16, $[LDW SP, #0xdfff]);
+          (0x434%u16, $[LD [#0xd600], A]);
+          (0x437%u16, $[LD A, #0x0]);
+          (0x439%u16, $[LDH [#0x7], A]);
+          (0x43b%u16, $[LD A, #0x0]);
+          (0x43d%u16, $[LDH [#0xf], A]);
+          (0x43f%u16, $[LD A, #0x0]);
+          (0x441%u16, $[LDH [#0xff], A]);
+          (0x443%u16, $[LD A, #0x0]);
+          (0x445%u16, $[LDH [#0x26], A]);
+          (0x447%u16, $[LD A, #0x80]);
+          (0x449%u16, $[LDH [#0x26], A]);
+          (0x44b%u16, $[LD A, #0xff]);
+          (0x44d%u16, $[LDH [#0x25], A]);
+          (0x44f%u16, $[LD A, #0x77]);
+          (0x451%u16, $[LDH [#0x24], A]);
+          (0x453%u16, $[LDW HL, #0xb8f]);
+          (0x456%u16, $[CALL #0x2a3]);
+          (0x459%u16, $[CALL #0x38e]);
+          (0x45c%u16, $[CALL #0xb79]);
+          (0x45f%u16, $[CALL #0x25f]);
+          (0x462%u16, $[PUSH AF]);
+          (0x463%u16, $[LD A, #0x3]);
+          (0x465%u16, $[CALL #0x22f]);
+          (0x468%u16, $[LD A, #0xff]);
+          (0x46a%u16, $[CALL #0x222]);
+          (0x46d%u16, $[LD A, #0xcd]);
+          (0x46f%u16, $[CALL #0x213]);
+          (0x472%u16, $[POP AF]);
+          (0x473%u16, $[CALL #0x63b]);
+          (0x476%u16, $[LD A, #0x0]);
+          (0x478%u16, $[JP #0x47b])], 0x47b%u16)
+    : itree ?E (list (u16 * instruction) * u16)
 *)
 
 End DisassemblyExamples.

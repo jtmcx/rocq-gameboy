@@ -136,9 +136,8 @@ Definition handle_cpu {E} : CpuE ~> stateT regfile (itree E)
 Definition handle_mem {E} : MemE ~> stateT (nmap u8) (itree E)
   := fun _ e mem => match e with
     | MemRead x => ret (mem, read_byte mem x)
-    | MemWrite x v => ret (nmap_insert (Uint16.to_N x) v mem, tt)
+    | MemWrite x v => ret (nmap_insert (Z.to_N (Uint16.unsigned x)) v mem, tt)
     end.
-
 
 Definition interp_cpu {E} : itree (CpuE +' E) ~> stateT regfile (itree E)
   := interp_state (case_ handle_cpu pure_state).
@@ -375,7 +374,6 @@ Proof.
   rewrite interp_gameboy_bind.
   rewrite interp_gameboy_fetch; cbn.
   rewrite interp_gameboy_fetch16. cbn.
-  unfold read_u16le, Uint16.concat; cbn.
   rewrite interp_ret.
   rewrite interp_gameboy_ret.
   rewrite bind_ret_l. cbn.
@@ -387,8 +385,7 @@ Proof.
   rewrite interp_gameboy_bind.
   rewrite interp_gameboy_bind.
   rewrite interp_gameboy_fetch; cbn.
-  rewrite interp_gameboy_fetch16. cbn.
-  unfold read_u16le, Uint16.concat; cbn.
+  rewrite interp_gameboy_fetch16; cbn.
   rewrite interp_ret.
   rewrite interp_gameboy_ret.
   rewrite bind_ret_l. cbn.

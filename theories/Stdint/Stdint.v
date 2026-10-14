@@ -1,338 +1,353 @@
 From Stdlib Require Import ZArith.
 From Stdlib Require Import Lia.
-From GameBoy.Stdint Require Export Byte.
 Local Open Scope bool_scope.
 
 (*|
-This module defines machine-width integers. It defines the
-types ``Int8.t``, ``Int16.t``, ``Uint8.t``, and ``Uint16.t``
-(abbreviated as ``i8``, ``i16``, ``u8``, and ``u16``,
-respectively). It takes heavy inspiration from the `Integers
-<https://compcert.org/doc/html/compcert.lib.Integers.html>`_ module
-in Compcert.
+This module defines machine-width integers. It defines the types `i8`,
+`i16`, `i32`, `i64`, `u8`, `u16`, `u32`, and `u16`. It takes heavy
+inspiration from the [Integers] module Compcert. (TODO: for this reason,
+this file should be licenses as LGPL v2.1!). The definitions in this file
+roughly mirror the definitions in the [ocaml-stdint] library. Extracting
+code after importing `StdintExtraction` will eventually generate OCaml
+code that uses the ocaml-stdint library.
+
+[Integers]: https://compcert.org/doc/html/compcert.lib.Integers.html
+[ocaml-stdint]: https://ocaml.org/p/stdint/latest
 
 Each integer type has its own notation scope (including number notations),
-which make it easy to perform arbitrary modular arithmetic in Rocq::
+which make it easy to perform arbitrary modular arithmetic in Rocq:
 
-    Compute ((0x55 .^ 0xAA) + 0x42)%u8.
-        = 0x41%u8 : Uint8.t
-
-The definitions in this file roughly mirror the definitions in the
-`ocaml-stdint <https://ocaml.org/p/stdint/latest>`_ library. Extracting
-code after importing ``StdintExtraction`` will generate OCaml code that
-uses the ocaml-stdint library. (This is a work in progress).
-
-Definitions
------------------------------------------------------------------------
-
-We start by defining a functor ``MakeInt`` that provides operations
-common to all integers. It's parameterized by ``IntType``, which defines
-the integer's underlying type ``t``, its width, and some functions that
-convert between ``t`` and ``N``. Conversions to and from ``N`` must be
-coherent, so we require some proofs concerning round-trips.
-
-All integer operations (add, sub, etc) are defined roughly the same
-way: we first convert any ``IntType.t`` into an ``N`` or ``Z``, perform
-the operation in that domain, and then wrap the result using ``wrapN``
-or ``wrapZ``. Note that ``MakeInt`` defines both signed *and* unsigned
-operations for a given ``IntType``.
+```
+Eval cbv in ((0x55 .^ 0xAA) + 0x42)%u8.
+    = 0x41%u8 : Uint8.t
+```
 |*)
 
-Module Type IntType.
-  Parameter t : Type.
+Module Type Width.
   Parameter width : positive.
-  Parameter to_N : t -> N.
-  Parameter wrapN : N -> t.
+End Width.
 
-  Parameter wrap_to_N : forall x,
-    wrapN (to_N x) = x.
-  Parameter to_N_wrap : forall n, 
-    to_N (wrapN n) = (n mod 2^(Npos width))%N.
-End IntType.
+Module MakeInt(W : Width).
+  Include W.
+  Local Open Scope Z_scope.
 
-Module MakeInt(I : IntType).
-  Include I.
-
-  Definition modulus : N := 2 ^ (Npos width).
-  Definition half_modulus : N := modulus / 2.
-  Definition zmodulus : Z := 2 ^ (Zpos width).
-  Definition zhalf_modulus : Z := zmodulus / 2.
-
-  Definition to_Z : t -> Z :=
-    fun x => let z := Z.of_N (to_N x) in 
-      if (zhalf_modulus <=? z)%Z then (z - zmodulus)%Z else z.
-
-  Definition wrapZ : Z -> t :=
-    fun z => wrapN (Z.to_N (z mod zmodulus)).
+  Definition modulus : Z := 2 ^ (Zpos width).
+  Definition half_modulus : Z := modulus / 2.
 
   Definition in_signed_range : Z -> bool :=
-    fun z => (-zhalf_modulus <=? z)%Z && (z <? zhalf_modulus)%Z.
+    fun z => (-half_modulus <=? z) && (z <? half_modulus).
 
-  Definition in_unsigned_range : N -> bool :=
-    fun n => (n <? modulus)%N.
+  Definition in_unsigned_range : Z -> bool :=
+    fun z => (0 <=? z) && (z <? modulus).
+
+  Record t := Int {
+    value : Z;
+    value_range : true = in_unsigned_range value;
+  }.
+
+  Definition unsigned x : Z := value x.
+
+  Definition signed x : Z :=
+    let u := unsigned x in 
+    if half_modulus <=? u then u - modulus else u.
+
+  Definition from_unsigned z : option t :=
+    match sumbool_of_bool (in_unsigned_range z) with
+    | left H => Some (Int z (eq_sym H))
+    | right _ => None
+    end.
+
+  Definition from_signed z : option t :=
+    if in_signed_range z
+      then from_unsigned (z mod modulus)
+      else None.
+
+  Lemma modulus_positive :
+    0 < modulus.
+  Proof.
+    unfold modulus. apply Z.pow_pos_nonneg; lia. 
+  Qed.
+
+  Lemma mod_modulus_in_unsigned_range : forall z,
+    in_unsigned_range (z mod modulus) = true.
+  Proof.
+    intros.
+    unfold in_unsigned_range.
+    apply andb_true_intro.
+    rewrite Z.leb_le, Z.ltb_lt.
+    apply Z.mod_pos_bound.
+    apply modulus_positive.
+  Qed.
+
+  Program Definition wrap : Z -> t :=
+    fun z => match from_unsigned (z mod modulus) with
+    | Some x => x
+    | None   => _ (* impossible *)
+    end.
+  Next Obligation.
+    unfold from_unsigned in *.
+    destruct sumbool_of_bool.
+    discriminate.
+    rewrite mod_modulus_in_unsigned_range in e.
+    discriminate.
+  Qed.
 
   Definition add : t -> t -> t :=
-    fun x y => wrapZ (to_Z x + to_Z y).
+    fun x y => wrap (unsigned x + unsigned y).
 
   Definition sub : t -> t -> t :=
-    fun x y => wrapZ (to_Z x - to_Z y).
+    fun x y => wrap (unsigned x - unsigned y).
 
   Definition mul : t -> t -> t :=
-    fun x y => wrapZ (to_Z x * to_Z y).
+    fun x y => wrap (unsigned x * unsigned y).
 
   Definition succ : t -> t :=
-    fun x => wrapZ (Z.succ (to_Z x)).
+    fun x => wrap (Z.succ (unsigned x)).
 
   Definition pred : t -> t :=
-    fun x => wrapZ (Z.pred (to_Z x)).
+    fun x => wrap (Z.pred (unsigned x)).
 
   Definition land : t -> t -> t :=
-    fun x y => wrapN (N.land (to_N x) (to_N y)).
+    fun x y => wrap (Z.land (unsigned x) (unsigned y)).
 
   Definition lor : t -> t -> t :=
-    fun x y => wrapN (N.lor (to_N x) (to_N y)).
+    fun x y => wrap (Z.lor (unsigned x) (unsigned y)).
 
   Definition lxor : t -> t -> t :=
-    fun x y => wrapN (N.lxor (to_N x) (to_N y)).
+    fun x y => wrap (Z.lxor (unsigned x) (unsigned y)).
 
   Definition lnot : t -> t :=
-    fun x => wrapN (N.lnot (to_N x) 8).
+    fun x => wrap (Z.lnot (unsigned x)).
 
   Definition shl : t -> t -> t :=
-    fun x k => wrapN (N.shiftl (to_N x) (to_N k)).
-
-  Definition unsigned_shr : t -> t -> t :=
-    fun x k => wrapN (N.shiftr (to_N x) (to_N k)).
-
-  Definition signed_shr : t -> t -> t :=
-    fun x k => wrapZ (Z.shiftr (to_Z x) (Z.of_N (to_N k))).
+    fun x k => wrap (Z.shiftl (unsigned x) (unsigned k)).
 
   Definition eqb : t -> t -> bool :=
-    fun x y => N.eqb (to_N x) (to_N y).
-
-  Definition signed_compare : t -> t -> comparison :=
-    fun x y => Z.compare (to_Z x) (to_Z y).
-
-  Definition unsigned_compare : t -> t -> comparison :=
-    fun x y => N.compare (to_N x) (to_N y).
-
-  Definition signed_ltb : t -> t -> bool :=
-    fun x y => Z.ltb (to_Z x) (to_Z y).
-
-  Definition unsigned_ltb : t -> t -> bool :=
-    fun x y => N.ltb (to_N x) (to_N y).
-
-  Definition signed_leb : t -> t -> bool :=
-    fun x y => Z.leb (to_Z x) (to_Z y).
-
-  Definition unsigned_leb : t -> t -> bool :=
-    fun x y => N.leb (to_N x) (to_N y).
-
-  Definition signed_gtb : t -> t -> bool :=
-    fun x y => Z.ltb (to_Z y) (to_Z x).
-
-  Definition unsigned_gtb : t -> t -> bool :=
-    fun x y => N.ltb (to_N y) (to_N x).
-
-  Definition signed_geb : t -> t -> bool :=
-    fun x y => Z.leb (to_Z y) (to_Z x).
-
-  Definition unsigned_geb : t -> t -> bool :=
-    fun x y => N.leb (to_N y) (to_N x).
-
-  Definition signed_lt : t -> t -> Prop :=
-    fun x y => signed_ltb x y = true.
-
-  Definition unsigned_lt : t -> t -> Prop :=
-    fun x y => unsigned_ltb x y = true.
-
-  Definition signed_le : t -> t -> Prop :=
-    fun x y => signed_leb x y = true.
-
-  Definition unsigned_le : t -> t -> Prop :=
-    fun x y => unsigned_leb x y = true.
-
-  Definition signed_ge : t -> t -> Prop :=
-    fun x y => signed_geb x y = true.
-
-  Definition unsigned_ge : t -> t -> Prop :=
-    fun x y => unsigned_geb x y = true.
-
-  Definition signed_gt : t -> t -> Prop :=
-    fun x y => signed_gtb x y = true.
-
-  Definition unsigned_gt : t -> t -> Prop :=
-    fun x y => unsigned_gtb x y = true.
-
-  Definition to_num_signed : t -> Number.int :=
-    fun b => Z.to_num_int (to_Z b).
-
-  Definition to_num_unsigned : t -> Number.uint :=
-    fun b => N.to_num_uint (to_N b).
-
-  Definition to_hex_signed : t -> Number.int :=
-    fun b => Z.to_num_hex_int (to_Z b).
-
-  Definition to_hex_unsigned : t -> Number.uint :=
-    fun b => N.to_num_hex_uint (to_N b).
-
-  Definition of_num_signed : Number.int -> option t :=
-    fun i => let z := Z.of_num_int i in
-      if in_signed_range z then Some (wrapZ z) else None.
-
-  Definition of_num_unsigned : Number.uint -> option t :=
-    fun i => let n := N.of_num_uint i in
-      if in_unsigned_range n then Some (wrapN n) else None.
-
+    fun x y => Z.eqb (unsigned x) (unsigned y).
 End MakeInt.
 
-(*|
-``IntOps`` defines an interface common to all integer types. The ``Int8``,
-``Int16``, ``Uint8`` and ``Uint16`` modules all implement this interface.
-Note that some operations behave differently for signed and unsigned
-integers. In particular, ``shr`` is a logical right shift if ``t``
-is unsigned, and arithmetic if ``t`` is signed.
-|*)
 
-Module Type IntOps.
-  Include IntType.
-  Parameter add : t -> t -> t.
-  Parameter sub : t -> t -> t.
-  Parameter mul : t -> t -> t.
-  Parameter succ : t -> t.
-  Parameter pred : t -> t.
-  Parameter land : t -> t -> t.
-  Parameter lor : t -> t -> t.
-  Parameter lxor : t -> t -> t.
-  Parameter lnot : t -> t.
-  Parameter shl : t -> t -> t.
-  Parameter shr : t -> t -> t.
-  Parameter lt : t -> t -> Prop.
-  Parameter le : t -> t -> Prop.
-  Parameter ge : t -> t -> Prop.
-  Parameter gt : t -> t -> Prop.
-  Parameter compare : t -> t -> comparison.
-  Parameter eqb : t -> t -> bool.
-  Parameter ltb : t -> t -> bool.
-  Parameter leb : t -> t -> bool.
-  Parameter geb : t -> t -> bool.
-  Parameter gtb : t -> t -> bool.
-  Parameter max_int : t.
-  Parameter min_int : t.
-End IntOps.
+Module MakeSigned(W : Width).
+  Include MakeInt(W).
+
+  Definition shr : t -> t -> t :=
+    fun x k => wrap (Z.shiftr (signed x) (unsigned k)).
+
+  Definition compare : t -> t -> comparison :=
+    fun x y => Z.compare (signed x) (signed y).
+
+  Definition ltb : t -> t -> bool :=
+    fun x y => Z.ltb (signed x) (signed y).
+
+  Definition leb : t -> t -> bool :=
+    fun x y => Z.leb (signed x) (signed y).
+
+  Definition geb : t -> t -> bool :=
+    fun x y => Z.leb (signed y) (signed x).
+
+  Definition gtb : t -> t -> bool :=
+    fun x y => Z.ltb (signed y) (signed x).
+
+  Definition lt : t -> t -> Prop :=
+    fun x y => ltb x y = true.
+
+  Definition le : t -> t -> Prop :=
+    fun x y => leb x y = true.
+
+  Definition ge : t -> t -> Prop :=
+    fun x y => geb x y = true.
+
+  Definition gt : t -> t -> Prop :=
+    fun x y => gtb x y = true.
+
+  Definition to_num : t -> Number.int :=
+    fun b => Z.to_num_int (signed b).
+
+  Definition to_hex : t -> Number.int :=
+    fun b => Z.to_num_hex_int (signed b).
+
+  Definition of_num : Number.int -> option t :=
+    fun b => from_signed (Z.of_num_int b).
+
+End MakeSigned.
 
 
-Module Int8Type <: IntType.
-  Definition t := byte.
+Module MakeUnsigned(W : Width).
+  Include MakeInt(W).
+
+  Definition shr : t -> t -> t :=
+    fun x k => wrap (Z.shiftr (unsigned x) (unsigned k)).
+
+  Definition compare : t -> t -> comparison :=
+    fun x y => Z.compare (unsigned x) (unsigned y).
+
+  Definition ltb : t -> t -> bool :=
+    fun x y => Z.ltb (unsigned x) (unsigned y).
+
+  Definition leb : t -> t -> bool :=
+    fun x y => Z.leb (unsigned x) (unsigned y).
+
+  Definition geb : t -> t -> bool :=
+    fun x y => Z.leb (unsigned y) (unsigned x).
+
+  Definition gtb : t -> t -> bool :=
+    fun x y => Z.ltb (unsigned y) (unsigned x).
+
+  Definition lt : t -> t -> Prop :=
+    fun x y => ltb x y = true.
+
+  Definition le : t -> t -> Prop :=
+    fun x y => leb x y = true.
+
+  Definition ge : t -> t -> Prop :=
+    fun x y => geb x y = true.
+
+  Definition gt : t -> t -> Prop :=
+    fun x y => gtb x y = true.
+
+  Definition to_num : t -> Number.int :=
+    fun b => Z.to_num_int (unsigned b).
+
+  Definition to_hex : t -> Number.int :=
+    fun b => Z.to_num_hex_int (unsigned b).
+
+  Definition of_num : Number.int -> option t :=
+    fun b => from_unsigned (Z.of_num_int b).
+
+End MakeUnsigned.
+
+Module Width8 <: Width.
   Definition width := 8%positive.
-  Definition wrapN := Byte.of_N.
-  Definition to_N := Byte.to_N.
-  Definition wrap_to_N := Byte.byte_N_roundtrip.
-  Definition to_N_wrap := Byte.N_byte_roundtrip.
-End Int8Type.
+End Width8.
 
-(*|
-16-bit integers are defined as a pair of bytes. Note that this type must
-be an inductive definition in order to support ``Number Notation``.
-|*)
-
-Record word16 := Word16 { hi : byte; lo : byte }.
-
-Module Int16Type <: IntType.
-  Definition t := word16.
+Module Width16 <: Width.
   Definition width := 16%positive.
+End Width16.
 
-  Definition to_N x : N :=
-    (Byte.to_N x.(hi)) * 256 + (Byte.to_N x.(lo)).
-  Definition wrapN n :=
-    {| hi := Byte.of_N (n / 256); lo := Byte.of_N n |}.
+Module Width32 <: Width.
+  Definition width := 32%positive.
+End Width32.
 
-  (* TODO! *)
-  Axiom wrap_to_N : forall x,
-    wrapN (to_N x) = x.
-  Axiom to_N_wrap : forall n,
-    to_N (wrapN n) = (n mod 2^(Npos width))%N.
-End Int16Type.
+Module Width64 <: Width.
+  Definition width := 64%positive.
+End Width64.
 
-
-Module Int8 <: IntOps.
-  Include MakeInt(Int8Type).
-  Definition shr := signed_shr.
-  Definition lt := signed_lt.
-  Definition le := signed_le.
-  Definition ge := signed_ge.
-  Definition gt := signed_gt.
-  Definition compare := signed_compare.
-  Definition ltb := signed_ltb.
-  Definition leb := signed_leb.
-  Definition geb := signed_geb.
-  Definition gtb := signed_gtb.
-  Definition min_int : t := x80.
-  Definition max_int : t := x7F.
-End Int8.
-
-Module Uint8 <: IntOps.
-  Include MakeInt(Int8Type).
-  Definition shr := unsigned_shr.
-  Definition lt := unsigned_lt.
-  Definition le := unsigned_le.
-  Definition ge := unsigned_ge.
-  Definition gt := unsigned_gt.
-  Definition compare := unsigned_compare.
-  Definition ltb := unsigned_ltb.
-  Definition leb := unsigned_leb.
-  Definition geb := unsigned_geb.
-  Definition gtb := unsigned_gtb.
-  Definition min_int : t := x00.
-  Definition max_int : t := xFF.
-End Uint8.
-
-Module Int16 <: IntOps.
-  Include MakeInt(Int16Type).
-  Definition shr := signed_shr.
-  Definition lt := signed_lt.
-  Definition le := signed_le.
-  Definition ge := signed_ge.
-  Definition gt := signed_gt.
-  Definition compare := signed_compare.
-  Definition ltb := signed_ltb.
-  Definition leb := signed_leb.
-  Definition geb := signed_geb.
-  Definition gtb := signed_gtb.
-  Definition min_int : t := {| hi := x80; lo := x00 |}.
-  Definition max_int : t := {| hi := x7F; lo := xFF |}.
-  Definition concat : byte -> byte -> t := Word16.
-  Definition hi := fun x => x.(hi).
-  Definition lo := fun x => x.(lo).
-End Int16.
-
-Module Uint16 <: IntOps.
-  Include MakeInt(Int16Type).
-  Definition shr := unsigned_shr.
-  Definition lt := unsigned_lt.
-  Definition le := unsigned_le.
-  Definition ge := unsigned_ge.
-  Definition gt := unsigned_gt.
-  Definition compare := unsigned_compare.
-  Definition ltb := unsigned_ltb.
-  Definition leb := unsigned_leb.
-  Definition geb := unsigned_geb.
-  Definition gtb := unsigned_gtb.
-  Definition min_int : t := {| hi := x00; lo := x00 |}.
-  Definition max_int : t := {| hi := xFF; lo := xFF |}.
-  Definition concat : byte -> byte -> t := Word16.
-  Definition hi := fun x => x.(hi).
-  Definition lo := fun x => x.(lo).
-End Uint16.
+Module Int8 := MakeSigned(Width8).
+Module Int16 := MakeSigned(Width16).
+Module Int32 := MakeSigned(Width32).
+Module Int64 := MakeSigned(Width64).
+Module Uint8 := MakeUnsigned(Width8).
+Module Uint16 := MakeUnsigned(Width16).
+Module Uint32 := MakeUnsigned(Width32).
+Module Uint64 := MakeUnsigned(Width64).
 
 Definition i8 : Type := Int8.t.
 Definition i16 : Type := Int16.t.
+Definition i32 : Type := Int32.t.
+Definition i64 : Type := Int64.t.
 Definition u8 : Type := Uint8.t.
 Definition u16 : Type := Uint16.t.
+Definition u32 : Type := Uint32.t.
+Definition u64 : Type := Uint64.t.
+
+Program Definition i8_to_i16 : i8 -> i16 :=
+  fun x => Int16.wrap (Int8.signed x).
+
+Program Definition i8_to_i32 : i8 -> i32 :=
+  fun x => Int32.wrap (Int8.signed x).
+
+Program Definition i8_to_i64 : i8 -> i64 :=
+  fun x => Int64.wrap (Int8.signed x).
+
+Program Definition i16_to_i8 : i16 -> i8 :=
+  fun x => Int8.wrap (Int16.signed x).
+
+Program Definition i16_to_i32 : i16 -> i32 :=
+  fun x => Int32.wrap (Int16.signed x).
+
+Program Definition i16_to_i64 : i16 -> i64 :=
+  fun x => Int64.wrap (Int16.signed x).
+
+Program Definition i32_to_i8 : i32 -> i8 :=
+  fun x => Int8.wrap (Int32.signed x).
+
+Program Definition i32_to_i16 : i32 -> i16 :=
+  fun x => Int16.wrap (Int32.signed x).
+
+Program Definition i32_to_i64 : i32 -> i64 :=
+  fun x => Int64.wrap (Int32.signed x).
+
+Program Definition i64_to_i8 : i64 -> i8 :=
+  fun x => Int8.wrap (Int64.signed x).
+
+Program Definition i64_to_i16 : i64 -> i16 :=
+  fun x => Int16.wrap (Int64.signed x).
+
+Program Definition i64_to_i32 : i64 -> i32 :=
+  fun x => Int32.wrap (Int64.signed x).
+
+Program Definition u8_to_u16 : u8 -> u16 :=
+  fun x => Uint16.wrap (Uint8.unsigned x).
+
+Program Definition u8_to_u32 : u8 -> u32 :=
+  fun x => Uint32.wrap (Uint8.unsigned x).
+
+Program Definition u8_to_u64 : u8 -> u64 :=
+  fun x => Uint64.wrap (Uint8.unsigned x).
+
+Program Definition u16_to_u8 : u16 -> u8 :=
+  fun x => Uint8.wrap (Uint16.unsigned x).
+
+Program Definition u16_to_u32 : u16 -> u32 :=
+  fun x => Uint32.wrap (Uint16.unsigned x).
+
+Program Definition u16_to_u64 : u16 -> u64 :=
+  fun x => Uint64.wrap (Uint16.unsigned x).
+
+Program Definition u32_to_u8 : u32 -> u8 :=
+  fun x => Uint8.wrap (Uint32.unsigned x).
+
+Program Definition u32_to_u16 : u32 -> u16 :=
+  fun x => Uint16.wrap (Uint32.unsigned x).
+
+Program Definition u32_to_u64 : u32 -> u64 :=
+  fun x => Uint64.wrap (Uint32.unsigned x).
+
+Program Definition u64_to_u8 : u64 -> u8 :=
+  fun x => Uint8.wrap (Uint64.unsigned x).
+
+Program Definition u64_to_u16 : u64 -> u16 :=
+  fun x => Uint16.wrap (Uint64.unsigned x).
+
+Program Definition u64_to_u32 : u64 -> u32 :=
+  fun x => Uint32.wrap (Uint64.unsigned x).
+
+Program Definition u8_to_i8 : u8 -> i8 :=
+  fun '(Uint8.Int x H) => Int8.Int x H.
+
+Program Definition u16_to_i16 : u16 -> i16 :=
+  fun '(Uint16.Int x H) => Int16.Int x H.
+
+Program Definition u32_to_i32 : u32 -> i32 :=
+  fun '(Uint32.Int x H) => Int32.Int x H.
+
+Program Definition u64_to_i64 : u64 -> i64 :=
+  fun '(Uint64.Int x H) => Int64.Int x H.
+
+Program Definition i8_to_u8 : i8 -> u8 :=
+  fun '(Int8.Int x H) => Uint8.Int x H.
+
+Program Definition i16_to_u16 : i16 -> u16 :=
+  fun '(Int16.Int x H) => Uint16.Int x H.
+
+Program Definition i32_to_u32 : i32 -> u32 :=
+  fun '(Int32.Int x H) => Uint32.Int x H.
+
+Program Definition i64_to_u64 : i64 -> u64 :=
+  fun '(Int64.Int x H) => Uint64.Int x H.
 
 (*|
-Notations
------------------------------------------------------------------------
+## Notations
 
 Unfortunately, we can't parameterize notations by scope, so we have to
 define the same notations for each integer type.
@@ -342,8 +357,7 @@ Declare Scope i8_scope.
 Delimit Scope i8_scope with i8.
 Bind Scope i8_scope with i8.
 
-Number Notation byte 
-  Int8.of_num_signed Int8.to_hex_signed : i8_scope.
+Number Notation Int8.t Int8.of_num Int8.to_hex : i8_scope.
 
 Notation "x + y"  := (Int8.add x y) : i8_scope.
 Notation "x - y"  := (Int8.sub x y) : i8_scope.
@@ -369,8 +383,7 @@ Declare Scope u8_scope.
 Delimit Scope u8_scope with u8.
 Bind Scope u8_scope with u8.
 
-Number Notation byte
-  Uint8.of_num_unsigned Uint8.to_hex_unsigned : u8_scope.
+Number Notation Uint8.t Uint8.of_num Uint8.to_hex : u8_scope.
 
 Notation "x + y"  := (Uint8.add x y) : u8_scope.
 Notation "x - y"  := (Uint8.sub x y) : u8_scope.
@@ -396,8 +409,7 @@ Declare Scope i16_scope.
 Delimit Scope i16_scope with i16.
 Bind Scope i16_scope with i16.
 
-Number Notation word16
-  Int16.of_num_signed Int16.to_hex_signed : i16_scope.
+Number Notation Int16.t Int16.of_num Int16.to_hex : i16_scope.
 
 Notation "x + y"  := (Int16.add x y) : i16_scope.
 Notation "x - y"  := (Int16.sub x y) : i16_scope.
@@ -423,8 +435,7 @@ Declare Scope u16_scope.
 Delimit Scope u16_scope with u16.
 Bind Scope u16_scope with u16.
 
-Number Notation word16
-  Uint16.of_num_unsigned Uint16.to_hex_unsigned : u16_scope.
+Number Notation Uint16.t Uint16.of_num Uint16.to_hex : u16_scope.
 
 Notation "x + y"  := (Uint16.add x y) : u16_scope.
 Notation "x - y"  := (Uint16.sub x y) : u16_scope.
@@ -445,62 +456,3 @@ Notation "x <=? y":= (Uint16.leb x y) : u16_scope.
 Notation "x =? y" := (Uint16.eqb x y) : u16_scope.
 Notation "x >=? y":= (Uint16.geb x y) : u16_scope.
 Notation "x >? y" := (Uint16.gtb x y) : u16_scope.
-
-(*|
-Extraction
------------------------------------------------------------------------
-
-This is a work in progress.
-|*)
-
-Module StdintExtraction.
-(*
-Extract Constant Int8.t         => "Stdint.Int8.t".
-Extract Constant Int8.succ      => "Stdint.Int8.succ".
-Extract Constant Int8.pred      => "Stdint.Int8.pred".
-Extract Constant Int8.add       => "Stdint.Int8.add".
-Extract Constant Int8.sub       => "Stdint.Int8.sub".
-Extract Constant Int8.lnot      => "Stdint.Int8.lognot".
-Extract Constant Int8.land      => "Stdint.Int8.logand".
-Extract Constant Int8.lor       => "Stdint.Int8.logor".
-Extract Constant Int8.lxor      => "Stdint.Int8.logxor".
-Extract Constant Int8.max_int   => "Stdint.Int8.max_int".
-Extract Constant Int8.min_int   => "Stdint.Int8.min_int".
-
-Extract Constant Int16.t        => "Stdint.Int16.t".
-Extract Constant Int16.succ     => "Stdint.Int16.succ".
-Extract Constant Int16.pred     => "Stdint.Int16.pred".
-Extract Constant Int16.add      => "Stdint.Int16.add".
-Extract Constant Int16.sub      => "Stdint.Int16.sub".
-Extract Constant Int16.lnot     => "Stdint.Int16.lognot".
-Extract Constant Int16.land     => "Stdint.Int16.logand".
-Extract Constant Int16.lor      => "Stdint.Int16.logor".
-Extract Constant Int16.lxor     => "Stdint.Int16.logxor".
-Extract Constant Int16.max_int  => "Stdint.Int16.max_int".
-Extract Constant Int16.min_int  => "Stdint.Int16.min_int".
-
-Extract Constant Uint8.t        => "Stdint.Uint8.t".
-Extract Constant Uint8.succ     => "Stdint.Uint8.succ".
-Extract Constant Uint8.pred     => "Stdint.Uint8.pred".
-Extract Constant Uint8.add      => "Stdint.Uint8.add".
-Extract Constant Uint8.sub      => "Stdint.Uint8.sub".
-Extract Constant Uint8.lnot     => "Stdint.Uint8.lognot".
-Extract Constant Uint8.land     => "Stdint.Uint8.logand".
-Extract Constant Uint8.lor      => "Stdint.Uint8.logor".
-Extract Constant Uint8.lxor     => "Stdint.Uint8.logxor".
-Extract Constant Uint8.max_int  => "Stdint.Uint8.max_int".
-Extract Constant Uint8.min_int  => "Stdint.Uint8.min_int".
-
-Extract Constant Uint16.t       => "Stdint.Uint16.t".
-Extract Constant Uint16.succ    => "Stdint.Uint16.succ".
-Extract Constant Uint16.pred    => "Stdint.Uint16.pred".
-Extract Constant Uint16.add     => "Stdint.Uint16.add".
-Extract Constant Uint16.sub     => "Stdint.Uint16.sub".
-Extract Constant Uint16.lnot    => "Stdint.Uint16.lognot".
-Extract Constant Uint16.land    => "Stdint.Uint16.logand".
-Extract Constant Uint16.lor     => "Stdint.Uint16.logor".
-Extract Constant Uint16.lxor    => "Stdint.Uint16.logxor".
-Extract Constant Uint16.max_int => "Stdint.Uint16.max_int".
-Extract Constant Uint16.min_int => "Stdint.Uint16.min_int".
-*)
-End StdintExtraction.
